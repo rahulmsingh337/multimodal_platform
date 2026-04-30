@@ -3,6 +3,7 @@ databases:
     databaseName: multimodal_db
     user: multimodal_user
     plan: free
+    ipAllowList: []  # empty = allow all IPs (required for Render-to-Render connections)
 
 services:
   - type: web
@@ -46,3 +47,4 @@ services:
     name: multimodal-redis
     plan: free
     maxmemoryPolicy: allkeys-lru
+    ipAllowList: []  # allow all
