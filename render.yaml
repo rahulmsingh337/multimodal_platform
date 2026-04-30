@@ -1,0 +1,48 @@
+databases:
+  - name: multimodal-db
+    databaseName: multimodal_db
+    user: multimodal_user
+    plan: free
+
+services:
+  - type: web
+    name: multimodal-api
+    plan: free
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: multimodal-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: multimodal-redis
+          type: redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: REPLICATE_API_TOKEN
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: us-east-1
+      - key: S3_BUCKET
+        sync: false
+      - key: CLOUDFRONT_DOMAIN
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+
+  - type: redis
+    name: multimodal-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru

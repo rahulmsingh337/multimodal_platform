@@ -1,22 +1,13 @@
 import asyncio
 from datetime import datetime
-from celery import Task
 from workers.celery_app import celery_app
-from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, select
-from config import settings
+from database import get_sync_db
 from models.models import Job, Avatar, Asset
 from engines.engines import AnimationEngine, VideoEngine, ImageEngine
 from integrations.elevenlabs_client import ElevenLabsClient
 from integrations.openai_client import get_openai_client
 from engines.nlp_engine import NLPEngine
 from storage.s3 import S3Client
-
-sync_engine = create_engine(settings.DATABASE_SYNC_URL)
-
-def get_sync_db():
-    with Session(sync_engine) as session:
-        return session
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
 def run_lora_training(self, job_id: str):
