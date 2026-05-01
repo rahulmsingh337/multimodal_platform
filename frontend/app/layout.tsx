@@ -3,6 +3,7 @@ import './globals.css'
 import Sidebar from '@/components/Sidebar'
 import AuthProvider from '@/components/AuthProvider'
 import AuthGuard from '@/components/AuthGuard'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 
 export const metadata: Metadata = {
   title: 'MultiModal AI Platform',
@@ -23,6 +24,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </AuthGuard>
         </AuthProvider>
+        <div className="flex h-screen overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto">
+            {children}
+          </main>
+        </div>
+        <SpeedInsights />
       </body>
     </html>
   )
