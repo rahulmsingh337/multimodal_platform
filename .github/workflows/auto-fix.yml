@@ -1,0 +1,65 @@
+name: 🔧 Auto-Fix Agent
+
+on:
+  workflow_run:
+    workflows: ["🤖 CI Agent — Build, Lint & Type Check"]
+    types: [completed]
+  push:
+    branches: ["master", "main"]
+
+jobs:
+  auto-fix:
+    name: 🔧 Auto-fix lint & format issues
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python tools
+        run: pip install ruff
+
+      - name: Install Node deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: 🔧 Auto-fix Python formatting
+        run: |
+          ruff check backend/ --fix --unsafe-fixes || true
+          ruff format backend/ || true
+
+      - name: 🔧 Auto-fix JS/TS formatting
+        working-directory: frontend
+        run: |
+          npx prettier --write "**/*.{ts,tsx,js,jsx,json}" --ignore-path .gitignore || true
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit auto-fixes
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "🔧 auto-fix: lint and format corrections [skip ci]"
+          git push

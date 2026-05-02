@@ -1,0 +1,116 @@
+name: 🔍 PR Validation Agent
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  validate-pr:
+    name: 🔍 Validate PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR title
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = context.payload.pull_request.title;
+            const validPrefixes = ['feat:', 'fix:', 'chore:', 'docs:', 'refactor:', 'test:', 'style:', 'perf:', 'ci:'];
+            const isValid = validPrefixes.some(p => title.toLowerCase().startsWith(p));
+            if (!isValid) {
+              core.warning(`PR title "${title}" doesn't follow conventional commits format.`);
+              core.warning(`Expected: feat: | fix: | chore: | docs: | refactor: | test: | style: | perf: | ci:`);
+            } else {
+              console.log(`✅ PR title is valid: "${title}"`);
+            }
+
+      - name: Check for large files
+        run: |
+          echo "Checking for files > 5MB..."
+          find . -size +5M -not -path "./.git/*" -not -path "./node_modules/*" | while read f; do
+            echo "::warning::Large file detected: $f"
+          done
+
+      - name: Check for secrets accidentally committed
+        run: |
+          echo "Scanning for potential secrets..."
+          # Check for common secret patterns
+          if grep -rn --include="*.ts" --include="*.js" --include="*.py" --include="*.env" \
+            -E "(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|r8_[a-zA-Z0-9]{20,}|AKIA[A-Z0-9]{16})" \
+            --exclude-dir=".git" --exclude-dir="node_modules" . 2>/dev/null; then
+            echo "::error::Potential secret detected in committed files!"
+            exit 1
+          else
+            echo "✅ No secrets detected"
+          fi
+
+      - name: Count changed files
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            console.log(`📁 Files changed: ${files.length}`);
+            files.forEach(f => console.log(`  ${f.status}: ${f.filename} (+${f.additions}/-${f.deletions})`));
+
+            if (files.length > 50) {
+              core.warning('This PR changes more than 50 files. Consider splitting into smaller PRs.');
+            }
+
+      - name: Comment validation summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const additions = files.reduce((s, f) => s + f.additions, 0);
+            const deletions = files.reduce((s, f) => s + f.deletions, 0);
+
+            const body = `## 🔍 PR Validation Report
+
+| Metric | Value |
+|--------|-------|
+| Files changed | ${files.length} |
+| Lines added | +${additions} |
+| Lines removed | -${deletions} |
+| Author | @${{ github.actor }} |
+| Branch | \`${{ github.head_ref }}\` → \`${{ github.base_ref }}\` |
+
+${files.length > 50 ? '> ⚠️ Large PR — consider splitting into smaller changes.' : '> ✅ PR size looks good.'}
+
+**Changed files:**
+${files.slice(0, 15).map(f => `- \`${f.filename}\` (${f.status})`).join('\n')}
+${files.length > 15 ? `\n_...and ${files.length - 15} more_` : ''}
+            `;
+
+            // Find existing bot comment and update, or create new
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.includes('PR Validation Report'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
