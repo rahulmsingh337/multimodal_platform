@@ -1,26 +1,23 @@
-import NextAuth, { AuthOptions } from 'next-auth'
+import NextAuth from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 
-export const authOptions: AuthOptions = {
+const handler = NextAuth({
   providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    }),
+    ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+      ? [GoogleProvider({
+          clientId: process.env.GOOGLE_CLIENT_ID,
+          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        })]
+      : []),
   ],
-  pages: {
-    signIn: '/auth/signin',
-  },
+  pages: { signIn: '/auth/signin' },
+  secret: process.env.NEXTAUTH_SECRET || 'fallback-dev-secret-change-in-prod',
   callbacks: {
     async session({ session, token }) {
-      if (session.user && token.sub) {
-        (session.user as any).id = token.sub
-      }
+      if (session.user && token.sub) (session.user as any).id = token.sub
       return session
     },
   },
-  secret: process.env.NEXTAUTH_SECRET,
-}
+})
 
-const handler = NextAuth(authOptions)
 export { handler as GET, handler as POST }

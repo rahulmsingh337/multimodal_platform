@@ -9,15 +9,21 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
 
+  const googleConfigured = !!(
+    typeof window !== 'undefined' &&
+    process.env.NEXT_PUBLIC_GOOGLE_CONFIGURED === 'true'
+  )
+
   useEffect(() => {
-    if (status === 'unauthenticated' && !pathname.startsWith('/auth')) {
+    // Only redirect if Google auth is configured AND user is not authenticated
+    if (status === 'unauthenticated' && !pathname.startsWith('/auth') && googleConfigured) {
       router.push('/auth/signin')
     }
-  }, [status, pathname, router])
+  }, [status, pathname, router, googleConfigured])
 
   if (pathname.startsWith('/auth')) return <>{children}</>
 
-  if (status === 'loading') {
+  if (status === 'loading' && googleConfigured) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#07070e]">
         <div className="flex flex-col items-center gap-4">
@@ -30,7 +36,6 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (!session) return null
-
+  // If Google not configured, render children directly (no auth required)
   return <>{children}</>
 }

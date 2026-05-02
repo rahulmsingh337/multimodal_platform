@@ -1,0 +1,69 @@
+name: 🔒 Security & Dependency Agent
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Every Monday 9am
+  push:
+    paths:
+      - "frontend/package.json"
+      - "backend/requirements.txt"
+  workflow_dispatch:
+
+jobs:
+  npm-audit:
+    name: 📦 NPM Security Audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+      - name: Check outdated
+        run: npm outdated || true
+
+  pip-safety:
+    name: 🐍 Python Dependency Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pip-audit
+      - name: Audit Python deps
+        run: pip-audit -r backend/requirements.txt
+        continue-on-error: true
+
+  open-issues-report:
+    name: 📋 Repo Health Report
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 10,
+            });
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+            });
+            console.log(`📋 Open issues: ${issues.length}`);
+            console.log(`🔀 Open PRs: ${prs.length}`);
+            issues.forEach(i => console.log(`  #${i.number}: ${i.title}`));
+            prs.forEach(p => console.log(`  PR #${p.number}: ${p.title} (${p.head.ref})`));
