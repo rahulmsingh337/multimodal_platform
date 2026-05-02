@@ -1,11 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  images: {
-    unoptimized: true,
-  },
+  images: { unoptimized: true },
   async rewrites() {
-    const api = process.env.NEXT_PUBLIC_API_URL || 'https://multimodal-api.onrender.com'
-    return [{ source: '/api/v1/:path*', destination: `${api}/api/v1/:path*` }]
+    return [{ source: '/api/v1/:path*', destination: 'https://multimodal-plat-rahul-singh-s-projects-9d848a7f.vercel.app/api/v1/:path*' }]
   },
 }
 module.exports = nextConfig
