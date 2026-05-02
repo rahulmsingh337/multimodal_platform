@@ -1,17 +1,12 @@
 name: 🔧 Auto-Fix Agent
 
 on:
-  workflow_run:
-    workflows: ["🤖 CI Agent — Build, Lint & Type Check"]
-    types: [completed]
-  push:
-    branches: ["master", "main"]
+  workflow_dispatch:  # Manual only - no automatic triggers to avoid build loops
 
 jobs:
   auto-fix:
     name: 🔧 Auto-fix lint & format issues
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
 
     steps:
       - uses: actions/checkout@v4
