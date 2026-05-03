@@ -1,123 +1,78 @@
-# 🚀 Full Stack Setup Guide
+# 🆓 Completely Free Setup Guide
 
-## What's Running Right Now
+Everything below is 100% free. No credit card required anywhere.
 
-| Service | URL | Status |
-|---------|-----|--------|
-| Frontend | https://multimodal-platform-eight.vercel.app | ✅ Live |
-| Backend API | https://multimodal-plat.vercel.app | ✅ Live |
-| Swagger Docs | https://multimodal-plat.vercel.app/docs | ✅ Live |
-| Health Check | https://multimodal-plat.vercel.app/health | ✅ Live |
+## What's Live Right Now (Zero Setup)
 
----
-
-## Step 1: Free Database — Neon Postgres (5 min)
-
-1. Go to **[neon.tech](https://neon.tech)** → Sign in with GitHub
-2. Click **New Project** → name it `multimodal` → region: `US East`
-3. Go to **Dashboard → Connection Details**
-4. Copy the **Connection string** (pooled):
-   ```
-   postgresql://user:password@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
-   ```
-5. Add to **Vercel → multimodal-plat → Settings → Environment Variables**:
-   ```
-   DATABASE_URL = postgresql://user:password@...neon.tech/neondb?sslmode=require
-   ```
+| Service | URL | Cost |
+|---------|-----|------|
+| Frontend | https://multimodal-platform-eight.vercel.app | FREE |
+| Backend API | https://multimodal-plat.vercel.app | FREE |
+| API Docs | https://multimodal-plat.vercel.app/docs | FREE |
+| NLP Engine | Client-side (no API) | FREE |
+| TTS Preview | Browser Web Speech API | FREE |
 
 ---
 
-## Step 2: Free Redis — Upstash (3 min)
+## Step 1: Free Persistent Database — Vercel Postgres (3 min)
 
-1. Go to **[upstash.com](https://upstash.com)** → Sign in with GitHub
-2. Click **Create Database** → name: `multimodal` → region: `us-east-1` → **Create**
-3. Click on your database → **Details** tab
-4. Copy the **Redis URL**:
+Vercel has a built-in free Postgres — no separate signup needed.
+
+1. Go to → **[vercel.com/dashboard](https://vercel.com/dashboard)**
+2. Click **Storage** tab (top nav)
+3. Click **Create** → **Postgres**
+4. Name: `multimodal-db` → Region: `Washington, D.C. (iad1)` → **Create**
+5. Click **Connect to Project** → select `multimodal-plat` → **Connect**
+6. Vercel auto-injects `POSTGRES_URL` into your project env vars ✅
+
+That's it — no connection string to copy, no config needed.
+
+---
+
+## Step 2: Free Image Generation — Hugging Face (2 min)
+
+FLUX.1-schnell is a free state-of-the-art image model.
+
+1. Go to → **[huggingface.co](https://huggingface.co)** → Sign up (free)
+2. Go to → **Settings → Access Tokens** → **New token** → Read access
+3. Copy the token (starts with `hf_`)
+4. Add to Vercel → `multimodal-plat` → Settings → Env Vars:
    ```
-   redis://default:xxxxx@global-xxx.upstash.io:6379
-   ```
-5. Add to **Vercel → multimodal-plat → Settings → Environment Variables**:
-   ```
-   REDIS_URL = redis://default:xxxxx@global-xxx.upstash.io:6379
+   HF_TOKEN = hf_xxxxxxxxxxxxxxxx
    ```
 
 ---
 
-## Step 3: Redeploy Backend
+## Step 3: Free Google Auth (already set up)
 
-After adding both env vars:
-- Vercel → `multimodal-plat` → **Deployments** → click `⋯` on latest → **Redeploy**
-
-Verify at: `https://multimodal-plat.vercel.app/health`
-```json
-{
-  "status": "ok",
-  "database": "neon-postgres",   ← ✅ connected
-  "cache": "upstash-redis",      ← ✅ connected
-  "storage": "local"
-}
+Just confirm these are in Vercel → `multimodal-platform` → Env Vars:
+```
+GOOGLE_CLIENT_ID      = xxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET  = GOCSPX-xxx
+NEXTAUTH_SECRET       = IqMrdCdMA8hRwxsjSIO+zsdQgbzgHFa6YRL5geiINO0=
+NEXTAUTH_URL          = https://multimodal-platform-eight.vercel.app
 ```
 
 ---
 
-## Step 4: API Keys (for real generation)
+## Free Stack Summary
 
-Add to **Vercel → multimodal-plat → Settings → Environment Variables**:
+| Component | Free Solution | Limit |
+|-----------|--------------|-------|
+| Frontend hosting | Vercel Hobby | 100GB bandwidth |
+| Backend hosting | Vercel Hobby | 100GB bandwidth |
+| Database | Vercel Postgres | 256MB storage |
+| NLP engine | Client-side JS | Unlimited |
+| Image gen | HF FLUX.1-schnell | ~1000 req/day |
+| TTS | Browser Web Speech API | Unlimited |
+| Video | Demo mode | — |
+| Auth | NextAuth + Google OAuth | Unlimited |
 
-| Key | Where to get | Cost |
-|-----|-------------|------|
-| `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | Pay per use |
-| `REPLICATE_API_TOKEN` | [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens) | Pay per use |
-| `ELEVENLABS_API_KEY` | [elevenlabs.io/settings/api-keys](https://elevenlabs.io/settings/api-keys) | Free tier |
-| `AWS_ACCESS_KEY_ID` | AWS IAM → create user with S3 access | Free tier |
-| `AWS_SECRET_ACCESS_KEY` | Same as above | Free tier |
-| `S3_BUCKET` | Your S3 bucket name | Free tier |
-| `CLOUDFRONT_DOMAIN` | CloudFront distribution URL | Free tier |
+## Upgrade Path (when ready)
 
----
-
-## Step 5: Google Auth (for real login)
-
-Already configured. Just ensure these are in **Vercel → multimodal-platform**:
-```
-GOOGLE_CLIENT_ID     = xxx.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET = GOCSPX-xxx
-NEXTAUTH_SECRET      = IqMrdCdMA8hRwxsjSIO+zsdQgbzgHFa6YRL5geiINO0=
-NEXTAUTH_URL         = https://multimodal-platform-eight.vercel.app
-```
-
----
-
-## Architecture Summary
-
-```
-Browser
-  └── Next.js Frontend (Vercel)
-        └── /api/v1/* → FastAPI Backend (Vercel)
-                          ├── Neon PostgreSQL (avatars, jobs, assets)
-                          ├── Upstash Redis (job queue, caching)
-                          ├── OpenAI GPT-4o (NLP engine)
-                          ├── Replicate (SDXL, SadTalker, SVD)
-                          ├── ElevenLabs (TTS, voice cloning)
-                          └── AWS S3 + CloudFront (asset CDN)
-```
-
----
-
-## Quick Test Commands
-
-```bash
-# Health check
-curl https://multimodal-plat.vercel.app/health
-
-# List avatars
-curl https://multimodal-plat.vercel.app/api/v1/avatars
-
-# Refine a prompt
-curl -X POST https://multimodal-plat.vercel.app/api/v1/generate/prompt-refine \
-  -H "Content-Type: application/json" \
-  -d '{"raw_prompt": "A woman speaking about AI", "context": {"type": "avatar_animate"}}'
-
-# Check storage status
-curl https://multimodal-plat.vercel.app/api/v1/storage/status
-```
+| Feature | Paid Option | Cost |
+|---------|------------|------|
+| Real avatar animation | Replicate SadTalker | ~$0.05/video |
+| Real video generation | Replicate SVD | ~$0.10/video |
+| Professional TTS | ElevenLabs | Free 10k chars/mo |
+| Better NLP | OpenAI GPT-4o | ~$0.002/request |
