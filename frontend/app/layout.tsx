@@ -3,6 +3,7 @@ import './globals.css'
 import Sidebar from '@/components/Sidebar'
 import AuthProvider from '@/components/AuthProvider'
 import AuthGuard from '@/components/AuthGuard'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 
 export const metadata: Metadata = {
   title: 'MultiModal AI Platform',
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </AuthGuard>
         </AuthProvider>
+        <SpeedInsights />
       </body>
     </html>
   )
