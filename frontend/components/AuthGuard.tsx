@@ -4,26 +4,26 @@ import { useRouter, usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 import { Activity } from 'lucide-react'
 
+const PUBLIC_PATHS = ['/auth/signin', '/auth/error']
+
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession()
   const router = useRouter()
   const pathname = usePathname()
 
-  const googleConfigured = !!(
-    typeof window !== 'undefined' &&
-    process.env.NEXT_PUBLIC_GOOGLE_CONFIGURED === 'true'
-  )
+  const isPublic = PUBLIC_PATHS.some(p => pathname.startsWith(p))
 
   useEffect(() => {
-    // Only redirect if Google auth is configured AND user is not authenticated
-    if (status === 'unauthenticated' && !pathname.startsWith('/auth') && googleConfigured) {
-      router.push('/auth/signin')
+    if (status === 'unauthenticated' && !isPublic) {
+      router.replace('/auth/signin')
     }
-  }, [status, pathname, router, googleConfigured])
+  }, [status, isPublic, router])
 
-  if (pathname.startsWith('/auth')) return <>{children}</>
+  // Always allow public paths
+  if (isPublic) return <>{children}</>
 
-  if (status === 'loading' && googleConfigured) {
+  // Show loading spinner while checking session
+  if (status === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#07070e]">
         <div className="flex flex-col items-center gap-4">
@@ -36,6 +36,20 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     )
   }
 
-  // If Google not configured, render children directly (no auth required)
+  // Block access — redirect is happening via useEffect
+  if (status === 'unauthenticated') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#07070e]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+            <Activity size={18} className="text-white" />
+          </div>
+          <p className="text-white/30 text-sm">Redirecting to sign in…</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Authenticated — render app
   return <>{children}</>
 }
