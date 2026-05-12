@@ -1,0 +1,217 @@
+name: 🔧 Error Detection & Auto-Fix Agent
+
+on:
+  push:
+    branches: ["master", "main"]
+  workflow_dispatch:
+    inputs:
+      force_fix:
+        description: 'Force run all fixes'
+        required: false
+        default: 'false'
+
+jobs:
+  detect-and-fix:
+    name: 🔍 Detect & Fix Errors
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 📦 Install dependencies
+        run: |
+          cd frontend && npm ci --silent
+          pip install ruff pyright --quiet
+
+      - name: 🔍 Run TypeScript type check
+        id: ts-check
+        run: |
+          cd frontend
+          if npx tsc --noEmit 2>&1 | tee /tmp/ts-errors.txt | grep -q "error TS"; then
+            echo "ts_errors=true" >> $GITHUB_OUTPUT
+            echo "::warning::TypeScript errors found"
+            cat /tmp/ts-errors.txt
+          else
+            echo "ts_errors=false" >> $GITHUB_OUTPUT
+            echo "✅ No TypeScript errors"
+          fi
+
+      - name: 🔍 Run Next.js build check
+        id: build-check
+        run: |
+          cd frontend
+          if npm run build 2>&1 | tee /tmp/build-output.txt | grep -qE "^Error:|Failed to compile"; then
+            echo "build_failed=true" >> $GITHUB_OUTPUT
+            echo "::error::Next.js build failed"
+          else
+            echo "build_failed=false" >> $GITHUB_OUTPUT
+            echo "✅ Build passed"
+          fi
+        env:
+          NEXTAUTH_SECRET: ci-test-secret
+          NEXT_PUBLIC_API_URL: https://multimodal-plat.vercel.app
+
+      - name: 🔍 Run Python syntax check
+        id: py-check
+        run: |
+          ERRORS=""
+          for f in backend/main.py backend/config.py backend/database.py backend/models/models.py backend/engines/nlp_engine.py backend/engines/engines.py backend/pipeline/tasks.py backend-vercel/api/index.py; do
+            if ! python3 -m py_compile "$f" 2>/dev/null; then
+              ERRORS="$ERRORS $f"
+              echo "::error file=$f::Python syntax error"
+            fi
+          done
+          if [ -n "$ERRORS" ]; then
+            echo "py_errors=true" >> $GITHUB_OUTPUT
+            echo "py_error_files=$ERRORS" >> $GITHUB_OUTPUT
+          else
+            echo "py_errors=false" >> $GITHUB_OUTPUT
+            echo "✅ All Python files valid"
+          fi
+
+      - name: 🔧 Auto-fix Python lint issues
+        id: py-fix
+        run: |
+          ruff check backend/ backend-vercel/ --fix --unsafe-fixes 2>&1 || true
+          ruff format backend/ backend-vercel/ 2>&1 || true
+          if ! git diff --quiet; then
+            echo "py_fixed=true" >> $GITHUB_OUTPUT
+            echo "Files auto-fixed:"
+            git diff --name-only
+          else
+            echo "py_fixed=false" >> $GITHUB_OUTPUT
+            echo "✅ No Python fixes needed"
+          fi
+
+      - name: 🔧 Auto-fix JS/TS formatting
+        id: js-fix
+        run: |
+          cd frontend
+          npx prettier --write "**/*.{ts,tsx,js,json}" --ignore-path .gitignore 2>/dev/null || true
+          cd ..
+          if ! git diff --quiet; then
+            echo "js_fixed=true" >> $GITHUB_OUTPUT
+            echo "Files formatted:"
+            git diff --name-only
+          else
+            echo "js_fixed=false" >> $GITHUB_OUTPUT
+            echo "✅ No JS/TS fixes needed"
+          fi
+
+      - name: 🔍 Check for exposed secrets
+        id: secrets-check
+        run: |
+          echo "Scanning for accidentally committed secrets..."
+          if grep -rn \
+            -E "(ghp_[a-zA-Z0-9]{36,}|sk-[a-zA-Z0-9]{20,}|r8_[a-zA-Z0-9]{20,}|hf_[a-zA-Z0-9]{20,}|GOCSPX-[a-zA-Z0-9]{20,}|rnd_[a-zA-Z0-9]{20,})" \
+            --include="*.ts" --include="*.tsx" --include="*.js" --include="*.py" --include="*.env" \
+            --exclude-dir=".git" --exclude-dir="node_modules" --exclude-dir=".next" . 2>/dev/null; then
+            echo "::error::⚠️ Potential secret exposed in code!"
+            echo "secrets_found=true" >> $GITHUB_OUTPUT
+          else
+            echo "secrets_found=false" >> $GITHUB_OUTPUT
+            echo "✅ No secrets detected"
+          fi
+
+      - name: 🔍 Check package.json versions
+        id: pkg-check
+        run: |
+          cd frontend
+          OUTDATED=$(npm outdated --json 2>/dev/null || echo "{}")
+          COUNT=$(echo "$OUTDATED" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "0")
+          echo "outdated_count=$COUNT" >> $GITHUB_OUTPUT
+          if [ "$COUNT" -gt "5" ]; then
+            echo "::warning::$COUNT outdated packages found"
+          fi
+
+      - name: 🔍 Validate YAML workflows
+        id: yaml-check
+        run: |
+          pip install pyyaml --quiet
+          ERRORS=""
+          for f in .github/workflows/*.yml; do
+            if ! python3 -c "import yaml; yaml.safe_load(open('$f'))" 2>/dev/null; then
+              ERRORS="$ERRORS $f"
+              echo "::error file=$f::Invalid YAML"
+            fi
+          done
+          if [ -n "$ERRORS" ]; then
+            echo "yaml_errors=true" >> $GITHUB_OUTPUT
+          else
+            echo "yaml_errors=false" >> $GITHUB_OUTPUT
+            echo "✅ All workflows valid"
+          fi
+
+      - name: 💾 Commit auto-fixes
+        if: steps.py-fix.outputs.py_fixed == 'true' || steps.js-fix.outputs.js_fixed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "🔧 auto-fix: lint + format corrections [skip ci]
+
+          Auto-fixed by Error Detection Agent:
+          - Python: ruff lint + format
+          - JS/TS: prettier format"
+          git push
+
+      - name: 📊 Generate fix report
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tsErrors    = '${{ steps.ts-check.outputs.ts_errors }}'    === 'true';
+            const buildFailed = '${{ steps.build-check.outputs.build_failed }}' === 'true';
+            const pyErrors    = '${{ steps.py-check.outputs.py_errors }}'    === 'true';
+            const secretsFound = '${{ steps.secrets-check.outputs.secrets_found }}' === 'true';
+            const yamlErrors  = '${{ steps.yaml-check.outputs.yaml_errors }}' === 'true';
+            const pyFixed     = '${{ steps.py-fix.outputs.py_fixed }}'       === 'true';
+            const jsFixed     = '${{ steps.js-fix.outputs.js_fixed }}'       === 'true';
+            const outdated    = parseInt('${{ steps.pkg-check.outputs.outdated_count }}' || '0');
+
+            const allOk = !tsErrors && !buildFailed && !pyErrors && !secretsFound && !yamlErrors;
+            const e = v => v ? '❌' : '✅';
+
+            const body = [
+              `## 🔧 Error Detection & Auto-Fix Report`,
+              '',
+              '| Check | Result |',
+              '|-------|--------|',
+              `| TypeScript types | ${e(tsErrors)} ${tsErrors ? 'Errors found' : 'Clean'} |`,
+              `| Next.js build | ${e(buildFailed)} ${buildFailed ? 'FAILED' : 'Passing'} |`,
+              `| Python syntax | ${e(pyErrors)} ${pyErrors ? 'Errors found' : 'Clean'} |`,
+              `| Secrets scan | ${secretsFound ? '🚨 SECRETS FOUND' : '✅ Clean'} |`,
+              `| YAML workflows | ${e(yamlErrors)} ${yamlErrors ? 'Invalid' : 'Valid'} |`,
+              `| Outdated packages | ${outdated > 5 ? '⚠️' : '✅'} ${outdated} outdated |`,
+              '',
+              '**Auto-fixes applied:**',
+              `- Python lint/format: ${pyFixed ? '✅ Fixed and committed' : '➖ Nothing to fix'}`,
+              `- JS/TS format: ${jsFixed ? '✅ Fixed and committed' : '➖ Nothing to fix'}`,
+              '',
+              allOk
+                ? '> ✅ All checks passed. No issues detected.'
+                : '> ⚠️ Issues detected. Check the details above.',
+              secretsFound ? '\n> 🚨 **CRITICAL: Exposed secrets detected. Rotate credentials immediately.**' : '',
+            ].join('\n');
+
+            core.summary.addRaw(body);
+            await core.summary.write();
+
+            if (secretsFound) core.setFailed('Exposed secrets detected!');
+            if (buildFailed) core.setFailed('Next.js build failed!');
