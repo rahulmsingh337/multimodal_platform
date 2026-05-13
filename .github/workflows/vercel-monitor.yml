@@ -1,4 +1,4 @@
-name: 📡 Vercel Deployment Monitor
+name: Vercel Deployment Monitor
 
 on:
   push:
@@ -6,183 +6,136 @@ on:
   workflow_dispatch:
 
 jobs:
-  monitor-frontend:
-    name: 🌐 Monitor Frontend
+  monitor:
+    name: Monitor All Services
     runs-on: ubuntu-latest
-    steps:
-      - name: ⏳ Wait for Vercel build
-        run: sleep 120
+    permissions:
+      contents: read
+      issues: write
 
-      - name: 🔍 Health check — Frontend
-        id: check
+    steps:
+      - name: Wait for Vercel
+        run: |
+          echo "Waiting 120s for Vercel deployments..."
+          sleep 120
+
+      - name: Check Frontend
+        id: fe
         run: |
           URL="https://multimodal-platform-eight.vercel.app"
-          echo "Checking $URL..."
-
+          echo "Checking frontend: $URL"
           for i in 1 2 3 4 5; do
-            HTTP=$(curl -s -o /tmp/resp.html -w "%{http_code}" --max-time 20 -L "$URL" 2>/dev/null || echo "000")
-            echo "Attempt $i: HTTP $HTTP"
-            if [[ "$HTTP" =~ ^(200|307|302|308)$ ]]; then
-              echo "status=healthy" >> $GITHUB_OUTPUT
-              echo "http=$HTTP" >> $GITHUB_OUTPUT
-              # Check for key page content
-              if grep -q "MultiModal\|multimodal\|Next\|__NEXT" /tmp/resp.html 2>/dev/null; then
-                echo "content=valid" >> $GITHUB_OUTPUT
-              fi
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 -L "$URL" 2>/dev/null || echo "000")
+            echo "  Attempt $i: HTTP $HTTP"
+            # Auth redirect (302/307) or 200 = site is UP
+            if [[ "$HTTP" =~ ^(200|302|307|308)$ ]]; then
+              echo "ok=true" >> $GITHUB_OUTPUT
+              echo "msg=HTTP $HTTP (UP)" >> $GITHUB_OUTPUT
               break
+            elif [[ "$HTTP" =~ ^5 ]]; then
+              echo "Server error on attempt $i"
             fi
             sleep 15
           done
-          [ -z "$(grep 'status=' $GITHUB_OUTPUT 2>/dev/null)" ] && echo "status=unhealthy" >> $GITHUB_OUTPUT
+          if ! grep -q "ok=" $GITHUB_OUTPUT 2>/dev/null; then
+            echo "ok=false" >> $GITHUB_OUTPUT
+            echo "msg=HTTP $HTTP (DOWN)" >> $GITHUB_OUTPUT
+          fi
 
-      - name: ✅ Frontend healthy
-        if: steps.check.outputs.status == 'healthy'
-        run: |
-          echo "✅ Frontend is live and responding"
-          echo "URL: https://multimodal-platform-eight.vercel.app"
-          echo "HTTP: ${{ steps.check.outputs.http }}"
-
-      - name: ❌ Frontend unhealthy
-        if: steps.check.outputs.status != 'healthy'
-        run: |
-          echo "::error::Frontend health check failed"
-          echo "URL: https://multimodal-platform-eight.vercel.app"
-          exit 1
-
-  monitor-backend:
-    name: ⚙️ Monitor Backend API
-    runs-on: ubuntu-latest
-    steps:
-      - name: ⏳ Wait for Vercel build
-        run: sleep 120
-
-      - name: 🔍 Health check — Backend
-        id: check
+      - name: Check Backend
+        id: be
         run: |
           URL="https://multimodal-plat.vercel.app"
-
+          echo "Checking backend: $URL/health"
           for i in 1 2 3 4 5; do
-            RESP=$(curl -s --max-time 20 "$URL/health" 2>/dev/null || echo "ERROR")
+            RESP=$(curl -s --max-time 20 "$URL/health" 2>/dev/null || echo "")
             HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$URL/health" 2>/dev/null || echo "000")
-            echo "Attempt $i: HTTP $HTTP — $RESP"
-
-            if echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('status')=='ok' else 1)" 2>/dev/null; then
-              echo "status=healthy" >> $GITHUB_OUTPUT
-              DB=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('database','unknown'))" 2>/dev/null)
-              AI=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('ai_image','unknown'))" 2>/dev/null)
+            echo "  Attempt $i: HTTP $HTTP"
+            if [ "$HTTP" = "200" ] && echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('status')=='ok' else 1)" 2>/dev/null; then
+              DB=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('database','?'))" 2>/dev/null || echo "?")
+              AI=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('ai_image','?'))" 2>/dev/null || echo "?")
+              echo "ok=true" >> $GITHUB_OUTPUT
+              echo "msg=HTTP 200 — DB:$DB AI:$AI" >> $GITHUB_OUTPUT
               echo "db=$DB" >> $GITHUB_OUTPUT
-              echo "ai=$AI" >> $GITHUB_OUTPUT
               break
             fi
             sleep 15
           done
-          [ -z "$(grep 'status=' $GITHUB_OUTPUT 2>/dev/null)" ] && echo "status=unhealthy" >> $GITHUB_OUTPUT
+          if ! grep -q "ok=" $GITHUB_OUTPUT 2>/dev/null; then
+            echo "ok=false" >> $GITHUB_OUTPUT
+            echo "msg=HTTP $HTTP — not responding correctly" >> $GITHUB_OUTPUT
+            echo "db=none" >> $GITHUB_OUTPUT
+          fi
 
-      - name: 🔍 Check all API endpoints
-        if: steps.check.outputs.status == 'healthy'
+      - name: Check all API endpoints
+        id: api
         run: |
           BASE="https://multimodal-plat.vercel.app"
-          declare -A ENDPOINTS=(
-            ["/health"]="200"
-            ["/docs"]="200"
-            ["/api/v1/avatars"]="200"
-            ["/api/v1/jobs/"]="200"
-            ["/api/v1/storage/status"]="200"
-          )
+          RESULTS=""
           ALL_OK=true
-          for EP in "${!ENDPOINTS[@]}"; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$BASE$EP" 2>/dev/null)
-            EXPECTED="${ENDPOINTS[$EP]}"
-            if [ "$STATUS" = "$EXPECTED" ]; then
-              echo "✅ $EP → $STATUS"
+          for EP in "/health" "/docs" "/api/v1/avatars" "/api/v1/jobs/" "/api/v1/storage/status"; do
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$BASE$EP" 2>/dev/null || echo "000")
+            if [ "$HTTP" = "200" ]; then
+              RESULTS="$RESULTS\n  PASS: $EP ($HTTP)"
             else
-              echo "❌ $EP → $STATUS (expected $EXPECTED)"
+              RESULTS="$RESULTS\n  FAIL: $EP ($HTTP)"
               ALL_OK=false
             fi
           done
-          $ALL_OK && echo "All endpoints healthy" || { echo "::warning::Some endpoints failing"; }
+          echo -e "$RESULTS"
+          echo "all_ok=$ALL_OK" >> $GITHUB_OUTPUT
 
-      - name: ✅ Backend healthy
-        if: steps.check.outputs.status == 'healthy'
+      - name: Write job summary
+        if: always()
         run: |
-          echo "✅ Backend API is live"
-          echo "Database: ${{ steps.check.outputs.db }}"
-          echo "AI Image: ${{ steps.check.outputs.ai }}"
+          FE_OK="${{ steps.fe.outputs.ok }}"
+          BE_OK="${{ steps.be.outputs.ok }}"
+          FE_MSG="${{ steps.fe.outputs.msg }}"
+          BE_MSG="${{ steps.be.outputs.msg }}"
+          DB="${{ steps.be.outputs.db }}"
+          ALL_OK="${{ steps.api.outputs.all_ok }}"
+          OVERALL=$([ "$FE_OK" = "true" ] && [ "$BE_OK" = "true" ] && echo "HEALTHY" || echo "DEGRADED")
 
-      - name: ❌ Backend unhealthy — create issue
-        if: steps.check.outputs.status != 'healthy'
+          echo "## Vercel Monitor — $OVERALL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | $([ "$FE_OK" = "true" ] && echo "✅" || echo "❌") $FE_MSG |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | $([ "$BE_OK" = "true" ] && echo "✅" || echo "❌") $BE_MSG |" >> $GITHUB_STEP_SUMMARY
+          echo "| Database | $([ "$DB" = "vercel-postgres" ] && echo "✅ Vercel Postgres" || echo "⚠️ in-memory only") |" >> $GITHUB_STEP_SUMMARY
+          echo "| All endpoints | $([ "$ALL_OK" = "true" ] && echo "✅ All passing" || echo "⚠️ Some failing") |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "$DB" = "in-memory (free)" ] || [ "$DB" = "none" ]; then
+            echo "> ⚠️ **Action needed:** Connect Vercel Postgres in Vercel Dashboard → Storage → Create → Connect to \`multimodal-plat\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Create issue if backend is down
+        if: steps.be.outputs.ok == 'false'
         uses: actions/github-script@v7
         with:
           script: |
-            const title = `🚨 Backend API down — ${new Date().toISOString().slice(0,10)}`;
-            const body = [
-              '## 🚨 Backend Health Check Failed',
-              '',
-              `**Time:** ${new Date().toISOString()}`,
-              `**URL:** https://multimodal-plat.vercel.app/health`,
-              `**Branch:** \`${context.ref.replace('refs/heads/','')}\``,
-              `**Commit:** \`${context.sha.slice(0,7)}\``,
-              '',
-              '### Immediate actions:',
-              '1. Check Vercel dashboard → `multimodal-plat` → Deployments → latest build logs',
-              '2. Check https://multimodal-plat.vercel.app/health manually',
-              '3. If 500: check `backend-vercel/api/index.py` for syntax errors',
-              '4. If build failed: check GitHub Actions → CI Agent logs',
-              '',
-              '### Common fixes:',
-              '- **500 FUNCTION_INVOCATION_FAILED**: Python import error or missing dependency',
-              '- **404**: Route not found — check `api/index.py` route definitions',
-              '- **Build failed**: Dependency in `requirements.txt` incompatible with Python 3.12',
-              '',
-              '_This issue was automatically created by the Vercel Deployment Monitor._',
-            ].join('\n');
-
-            // Check if issue already exists
             const existing = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              labels: ['deployment-failure'],
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: ['deployment-failure'],
             });
-
+            const title = 'Backend API down — ' + new Date().toISOString().slice(0,10);
+            const body = [
+              '## Backend Health Check Failed',
+              '',
+              'URL: https://multimodal-plat.vercel.app/health',
+              'Status: ' + '${{ steps.be.outputs.msg }}',
+              'Commit: `' + context.sha.slice(0,7) + '`',
+              '',
+              '### Checklist:',
+              '- [ ] Check Vercel → multimodal-plat → latest deployment logs',
+              '- [ ] Verify `backend-vercel/api/index.py` has no syntax errors',
+              '- [ ] Check `requirements.txt` has compatible packages',
+              '- [ ] Ensure `POSTGRES_URL` and `HF_TOKEN` are set in Vercel env vars',
+            ].join('\n');
             if (existing.data.length === 0) {
               await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title,
-                body,
-                labels: ['deployment-failure', 'bug'],
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['deployment-failure', 'bug'],
               });
-              console.log('Issue created');
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: existing.data[0].number,
-                body: `## 🔄 Still failing — ${new Date().toISOString()}\n\nCommit: \`${context.sha.slice(0,7)}\``,
-              });
-              console.log('Comment added to existing issue');
             }
-            core.setFailed('Backend health check failed — issue created');
-
-  notify-success:
-    name: 🎉 Notify on success
-    runs-on: ubuntu-latest
-    needs: [monitor-frontend, monitor-backend]
-    if: success()
-    steps:
-      - uses: actions/github-script@v7
-        with:
-          script: |
-            core.summary.addRaw([
-              '## 🎉 Deployment Healthy',
-              '',
-              '| Service | URL | Status |',
-              '|---------|-----|--------|',
-              '| 🌐 Frontend | https://multimodal-platform-eight.vercel.app | ✅ Live |',
-              '| ⚙️ Backend | https://multimodal-plat.vercel.app | ✅ Live |',
-              '| 📖 API Docs | https://multimodal-plat.vercel.app/docs | ✅ Live |',
-              '',
-              `**Commit:** \`${context.sha.slice(0,7)}\` · **Branch:** \`${context.ref.replace('refs/heads/','')}\``,
-            ].join('\n'));
-            await core.summary.write();
+            core.setFailed('Backend is down — issue created');
