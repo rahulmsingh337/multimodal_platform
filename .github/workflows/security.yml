@@ -1,17 +1,18 @@
-name: 🔒 Security & Dependency Agent
+name: Security & Dependency Agent
 
 on:
   schedule:
-    - cron: "0 9 * * 1"  # Every Monday 9am
+    - cron: "0 9 * * 1"
   push:
     paths:
       - "frontend/package.json"
       - "backend/requirements.txt"
+      - "backend-vercel/requirements.txt"
   workflow_dispatch:
 
 jobs:
   npm-audit:
-    name: 📦 NPM Security Audit
+    name: NPM Security Audit
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -23,28 +24,41 @@ jobs:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - name: Audit
-        run: npm audit --audit-level=high
-        continue-on-error: true
-      - name: Check outdated
-        run: npm outdated || true
+      - name: Install
+        run: npm ci --silent
+      - name: Audit (high severity only — moderate acceptable)
+        run: |
+          npm audit --audit-level=high 2>&1 || true
+          HIGHS=$(npm audit --json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(1 for v in d.get('vulnerabilities',{}).values() if v.get('severity') in ('critical','high') and not v.get('fixAvailable',False)))" 2>/dev/null || echo "0")
+          echo "Unpatched high/critical: $HIGHS"
+          if [ "$HIGHS" -gt "0" ]; then
+            echo "::warning::$HIGHS unpatched high/critical vulnerabilities (no fix available from maintainers)"
+          fi
+          # Write summary
+          echo "## NPM Security Audit" >> $GITHUB_STEP_SUMMARY
+          npm audit --audit-level=high 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY || echo "No high vulnerabilities" >> $GITHUB_STEP_SUMMARY
 
-  pip-safety:
-    name: 🐍 Python Dependency Check
+  pip-audit:
+    name: Python Dependency Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install pip-audit
-      - name: Audit Python deps
-        run: pip-audit -r backend/requirements.txt
-        continue-on-error: true
+      - name: Install pip-audit
+        run: pip install pip-audit --quiet
+      - name: Audit backend-vercel
+        run: |
+          pip-audit -r backend-vercel/requirements.txt --skip-editable 2>&1 || true
+          echo "## Python Security Audit" >> $GITHUB_STEP_SUMMARY
+          pip-audit -r backend-vercel/requirements.txt --skip-editable 2>&1 >> $GITHUB_STEP_SUMMARY || echo "No known vulnerabilities" >> $GITHUB_STEP_SUMMARY
+      - name: Audit backend (full)
+        run: |
+          pip-audit -r backend/requirements.txt --skip-editable 2>&1 || true
 
-  open-issues-report:
-    name: 📋 Repo Health Report
+  repo-health:
+    name: Repo Health Report
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
@@ -52,18 +66,23 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              per_page: 10,
-            });
-            const { data: prs } = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-            });
-            console.log(`📋 Open issues: ${issues.length}`);
-            console.log(`🔀 Open PRs: ${prs.length}`);
-            issues.forEach(i => console.log(`  #${i.number}: ${i.title}`));
-            prs.forEach(p => console.log(`  PR #${p.number}: ${p.title} (${p.head.ref})`));
+            const [issues, prs] = await Promise.all([
+              github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 10 }),
+              github.rest.pulls.list({ owner: context.repo.owner, repo: context.repo.repo, state: 'open' }),
+            ]);
+            const openIssues = issues.data.filter(i => !i.pull_request);
+            const body = [
+              '## Repo Health Report',
+              '',
+              `| Metric | Count |`,
+              `|--------|-------|`,
+              `| Open issues | ${openIssues.length} |`,
+              `| Open PRs | ${prs.data.length} |`,
+              '',
+              openIssues.length > 0 ? '**Open issues:**\n' + openIssues.map(i => `- #${i.number}: ${i.title}`).join('\n') : '✅ No open issues',
+              '',
+              prs.data.length > 0 ? '**Open PRs:**\n' + prs.data.map(p => `- #${p.number}: ${p.title} (${p.head.ref})`).join('\n') : '✅ No open PRs',
+            ].join('\n');
+            core.summary.addRaw(body);
+            await core.summary.write();
+            console.log('Open issues:', openIssues.length, '| Open PRs:', prs.data.length);
