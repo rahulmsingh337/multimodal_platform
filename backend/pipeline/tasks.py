@@ -2,12 +2,13 @@ import asyncio
 from datetime import datetime
 from workers.celery_app import celery_app
 from database import get_sync_db
-from models.models import Job, Avatar, Asset
+from models.models import Job, Avatar
 from engines.engines import AnimationEngine, VideoEngine, ImageEngine
 from integrations.elevenlabs_client import ElevenLabsClient
 from integrations.openai_client import get_openai_client
 from engines.nlp_engine import NLPEngine
 from storage.s3 import S3Client
+
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
 def run_lora_training(self, job_id: str):
@@ -19,7 +20,9 @@ def run_lora_training(self, job_id: str):
     try:
         # Replicate LoRA training would run here
         # Using predictions.create() + polling for production
-        import time; time.sleep(2)  # Placeholder
+        import time
+
+        time.sleep(2)  # Placeholder
         avatar = db.get(Avatar, job.avatar_id)
         avatar.lora_weights_url = f"users/{avatar.user_id}/lora/{avatar.id}.safetensors"
         avatar.lora_trained_at = datetime.utcnow()
@@ -32,6 +35,7 @@ def run_lora_training(self, job_id: str):
         db.commit()
         raise self.retry(exc=exc)
 
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def run_animation(self, job_id: str):
     db = get_sync_db()
@@ -43,20 +47,27 @@ def run_animation(self, job_id: str):
         s3 = S3Client()
         el = ElevenLabsClient()
         engine = AnimationEngine(el, s3)
-        result = asyncio.run(engine.animate(
-            avatar_image_url=job.input_payload["avatar_image_url"],
-            speech_text=job.input_payload["text"],
-            voice_id=job.input_payload["voice_id"],
-        ))
+        result = asyncio.run(
+            engine.animate(
+                avatar_image_url=job.input_payload["avatar_image_url"],
+                speech_text=job.input_payload["text"],
+                voice_id=job.input_payload["voice_id"],
+            )
+        )
         job.status = "done"
         job.completed_at = datetime.utcnow()
-        job.output_payload = {"video_url": result.video_url, "audio_url": result.audio_url, "duration_s": result.duration_s}
+        job.output_payload = {
+            "video_url": result.video_url,
+            "audio_url": result.audio_url,
+            "duration_s": result.duration_s,
+        }
         db.commit()
     except Exception as exc:
         job.status = "failed"
         job.error = str(exc)
         db.commit()
         raise self.retry(exc=exc)
+
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def run_text2video(self, job_id: str):
@@ -66,22 +77,26 @@ def run_text2video(self, job_id: str):
     job.started_at = datetime.utcnow()
     db.commit()
     try:
-        s3 = S3Client()
+        S3Client()
         nlp = NLPEngine(get_openai_client())
         parsed = asyncio.run(nlp.parse(job.input_payload["raw_prompt"]))
-        image_engine = ImageEngine()
+        ImageEngine()
         # Generate image from prompt, then animate with SVD
-        video_engine = VideoEngine()
+        VideoEngine()
         # Full pipeline: NLP → Image → SVD
         job.status = "done"
         job.completed_at = datetime.utcnow()
-        job.output_payload = {"refined_prompt": parsed.refined_prompt, "status": "complete"}
+        job.output_payload = {
+            "refined_prompt": parsed.refined_prompt,
+            "status": "complete",
+        }
         db.commit()
     except Exception as exc:
         job.status = "failed"
         job.error = str(exc)
         db.commit()
         raise self.retry(exc=exc)
+
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=10)
 def run_tts(self, job_id: str):
@@ -93,7 +108,9 @@ def run_tts(self, job_id: str):
     try:
         el = ElevenLabsClient()
         s3 = S3Client()
-        audio_bytes = asyncio.run(el.generate_speech(job.input_payload["text"], job.input_payload["voice_id"]))
+        audio_bytes = asyncio.run(
+            el.generate_speech(job.input_payload["text"], job.input_payload["voice_id"])
+        )
         key = f"audio/{job.input_payload['voice_id']}/{job.id}.mp3"
         audio_url = asyncio.run(s3.upload_bytes(audio_bytes, key, "audio/mpeg"))
         job.status = "done"

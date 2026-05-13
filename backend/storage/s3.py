@@ -1,6 +1,6 @@
 import boto3
-from botocore.exceptions import ClientError
 from config import settings
+
 
 class S3Client:
     def __init__(self):
@@ -15,6 +15,7 @@ class S3Client:
 
     async def upload_bytes(self, data: bytes, key: str, content_type: str) -> str:
         import asyncio
+
         await asyncio.to_thread(
             self.client.put_object,
             Bucket=self.bucket,

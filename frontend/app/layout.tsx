@@ -1,16 +1,21 @@
-import type { Metadata } from 'next'
-import './globals.css'
-import Sidebar from '@/components/Sidebar'
-import AuthProvider from '@/components/AuthProvider'
-import AuthGuard from '@/components/AuthGuard'
-import { SpeedInsights } from '@vercel/speed-insights/next'
+import type { Metadata } from "next";
+import "./globals.css";
+import Sidebar from "@/components/Sidebar";
+import AuthProvider from "@/components/AuthProvider";
+import AuthGuard from "@/components/AuthGuard";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 export const metadata: Metadata = {
-  title: 'MultiModal AI Platform',
-  description: 'Avatar animation, text-to-video, and voice synthesis powered by AI',
-}
+  title: "MultiModal AI Platform",
+  description:
+    "Avatar animation, text-to-video, and voice synthesis powered by AI",
+};
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
       <body>
@@ -18,14 +23,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <AuthGuard>
             <div className="flex h-screen overflow-hidden">
               <Sidebar />
-              <main className="flex-1 overflow-y-auto">
-                {children}
-              </main>
+              <main className="flex-1 overflow-y-auto">{children}</main>
             </div>
           </AuthGuard>
         </AuthProvider>
         <SpeedInsights />
       </body>
     </html>
-  )
+  );
 }

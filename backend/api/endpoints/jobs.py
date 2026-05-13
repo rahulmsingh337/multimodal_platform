@@ -7,6 +7,7 @@ from models.models import Job
 
 router = APIRouter()
 
+
 @router.get("/{job_id}")
 async def get_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Job).where(Job.id == job_id))
@@ -25,6 +26,7 @@ async def get_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
     }
 
+
 @router.get("/")
 async def list_jobs(
     page: int = Query(1, ge=1),
@@ -39,8 +41,17 @@ async def list_jobs(
     return {
         "page": page,
         "limit": limit,
-        "jobs": [{"id": str(j.id), "type": j.job_type, "status": j.status, "created_at": j.created_at.isoformat()} for j in jobs],
+        "jobs": [
+            {
+                "id": str(j.id),
+                "type": j.job_type,
+                "status": j.status,
+                "created_at": j.created_at.isoformat(),
+            }
+            for j in jobs
+        ],
     }
+
 
 @router.delete("/{job_id}")
 async def cancel_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):

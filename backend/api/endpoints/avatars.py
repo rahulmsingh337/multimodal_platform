@@ -9,6 +9,7 @@ from pipeline.tasks import run_lora_training, run_animation
 
 router = APIRouter()
 
+
 @router.post("/")
 async def create_avatar(
     name: str,
@@ -18,7 +19,9 @@ async def create_avatar(
     s3 = S3Client()
     user_id = uuid.uuid4()  # Replace with real auth
     s3_key = f"users/{user_id}/source/{uuid.uuid4()}.jpg"
-    image_url = await s3.upload_file(await file.read(), s3_key, file.content_type or "image/jpeg")
+    image_url = await s3.upload_file(
+        await file.read(), s3_key, file.content_type or "image/jpeg"
+    )
 
     avatar = Avatar(user_id=user_id, name=name, source_image_url=s3_key)
     db.add(avatar)

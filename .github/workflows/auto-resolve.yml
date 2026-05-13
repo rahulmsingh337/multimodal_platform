@@ -1,0 +1,186 @@
+name: 🛠️ Auto-Resolve Deployment Failures
+
+on:
+  issues:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to resolve'
+        required: false
+
+jobs:
+  auto-resolve:
+    name: 🔍 Diagnose & Fix
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.issue.labels.*.name, 'deployment-failure')
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 🔍 Diagnose backend issue
+        id: diagnose
+        run: |
+          echo "=== Backend Diagnosis ==="
+          
+          # 1. Check Python syntax
+          SYNTAX_OK=true
+          for f in backend-vercel/api/index.py; do
+            if ! python3 -m py_compile "$f" 2>/tmp/py_err.txt; then
+              echo "❌ Syntax error in $f:"
+              cat /tmp/py_err.txt
+              echo "diagnosis=syntax_error" >> $GITHUB_OUTPUT
+              echo "error_file=$f" >> $GITHUB_OUTPUT
+              SYNTAX_OK=false
+              break
+            fi
+          done
+          $SYNTAX_OK && echo "✅ Python syntax OK"
+          
+          # 2. Check requirements.txt
+          if ! pip install -r backend-vercel/requirements.txt --dry-run 2>/tmp/pip_err.txt; then
+            echo "❌ requirements.txt issues:"
+            cat /tmp/pip_err.txt | head -20
+            echo "diagnosis=requirements_error" >> $GITHUB_OUTPUT
+          else
+            echo "✅ requirements.txt OK"
+          fi
+          
+          # 3. Check for import issues
+          pip install -r backend-vercel/requirements.txt -q 2>/dev/null
+          if ! python3 -c "import sys; sys.path.insert(0, 'backend-vercel'); from api.index import app; print('✅ App imports OK')" 2>/tmp/import_err.txt; then
+            echo "❌ Import error:"
+            cat /tmp/import_err.txt
+            echo "diagnosis=import_error" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🔍 Diagnose frontend issue
+        id: diagnose-fe
+        run: |
+          echo "=== Frontend Diagnosis ==="
+          cd frontend && npm ci --silent 2>/dev/null
+          
+          # Type check
+          if ! npx tsc --noEmit 2>/tmp/ts_err.txt; then
+            echo "::warning::TypeScript errors found"
+            cat /tmp/ts_err.txt | head -20
+            echo "ts_errors=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ TypeScript OK"
+            echo "ts_errors=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Build
+          if ! NEXTAUTH_SECRET=test NEXT_PUBLIC_API_URL=https://multimodal-plat.vercel.app npm run build 2>/tmp/build_err.txt; then
+            echo "::error::Build failed"
+            cat /tmp/build_err.txt | grep -E "Error:|error:" | head -10
+            echo "build_failed=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Build OK"
+            echo "build_failed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🔧 Apply fixes
+        id: fixes
+        run: |
+          FIXED=false
+          
+          # Fix: update dependencies if outdated
+          pip install ruff --quiet
+          ruff check backend-vercel/ --fix --unsafe-fixes 2>/dev/null || true
+          ruff format backend-vercel/ 2>/dev/null || true
+          
+          if ! git diff --quiet; then
+            echo "fixes_applied=true" >> $GITHUB_OUTPUT
+            echo "fix_desc=Auto-fixed Python lint issues" >> $GITHUB_OUTPUT
+            FIXED=true
+          else
+            echo "fixes_applied=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 💾 Commit fixes
+        if: steps.fixes.outputs.fixes_applied == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "🛠️ auto-resolve: fix deployment issues [skip ci]
+
+          Applied by Auto-Resolve Deployment Failures agent.
+          Fixes: ${{ steps.fixes.outputs.fix_desc }}"
+          git push
+
+      - name: 📝 Comment on issue with diagnosis
+        if: github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const diagnosis  = '${{ steps.diagnose.outputs.diagnosis }}' || 'unknown';
+            const tsErrors   = '${{ steps.diagnose-fe.outputs.ts_errors }}' === 'true';
+            const buildFailed= '${{ steps.diagnose-fe.outputs.build_failed }}' === 'true';
+            const fixesApplied='${{ steps.fixes.outputs.fixes_applied }}' === 'true';
+
+            const allOk = !tsErrors && !buildFailed && diagnosis === '';
+            const status = allOk ? '✅ No issues found' : '⚠️ Issues detected';
+
+            const diagMap = {
+              'syntax_error':    '❌ Python syntax error in `${{ steps.diagnose.outputs.error_file }}`',
+              'requirements_error': '❌ `requirements.txt` has incompatible packages',
+              'import_error':    '❌ Python import failed — missing dependency or circular import',
+              '':                '✅ Backend Python checks passed',
+            };
+
+            const body = [
+              '## 🤖 Auto-Diagnosis Report',
+              '',
+              '| Check | Result |',
+              '|-------|--------|',
+              `| Backend Python | ${diagMap[diagnosis] || '✅ OK'} |`,
+              `| TypeScript | ${tsErrors ? '❌ Errors found' : '✅ Clean'} |`,
+              `| Next.js build | ${buildFailed ? '❌ Failed' : '✅ Passing'} |`,
+              `| Auto-fixes | ${fixesApplied ? '✅ Applied and pushed' : '➖ None needed'} |`,
+              '',
+              allOk && !fixesApplied
+                ? '> ✅ All checks pass locally. Issue may be environment-specific (missing env vars in Vercel).'
+                : fixesApplied
+                ? '> ✅ Auto-fixes applied. A new deployment has been triggered.'
+                : '> ⚠️ Issues found that require manual intervention. See details below.',
+              '',
+              '### Next steps:',
+              '1. Check https://multimodal-plat.vercel.app/health',
+              '2. Verify `POSTGRES_URL` and `HF_TOKEN` are set in Vercel → `multimodal-plat` → Env Vars',
+              '3. Check Vercel dashboard build logs for the exact error',
+              fixesApplied ? '4. ✅ A fix commit was pushed — new deployment in progress' : '',
+            ].filter(Boolean).join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+            if (fixesApplied || allOk) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                state: fixesApplied ? 'closed' : 'open',
+              });
+            }

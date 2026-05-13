@@ -10,18 +10,22 @@ from pipeline.tasks import run_text2video, run_tts
 
 router = APIRouter()
 
+
 class Text2VideoRequest(BaseModel):
     raw_prompt: str
     motion_bucket_id: int = 127
     duration_s: float = 4.0
 
+
 class TTSRequest(BaseModel):
     text: str
     voice_id: str = "21m00Tcm4TlvDq8ikWAM"
 
+
 class PromptRefineRequest(BaseModel):
     raw_prompt: str
     context: dict = {}
+
 
 @router.post("/text2video")
 async def text_to_video(req: Text2VideoRequest, db: AsyncSession = Depends(get_db)):
@@ -36,6 +40,7 @@ async def text_to_video(req: Text2VideoRequest, db: AsyncSession = Depends(get_d
     run_text2video.delay(str(job.id))
     return {"job_id": str(job.id), "status": "queued"}
 
+
 @router.post("/text2speech")
 async def text_to_speech(req: TTSRequest, db: AsyncSession = Depends(get_db)):
     user_id = uuid.uuid4()
@@ -48,6 +53,7 @@ async def text_to_speech(req: TTSRequest, db: AsyncSession = Depends(get_db)):
     await db.commit()
     run_tts.delay(str(job.id))
     return {"job_id": str(job.id), "status": "queued"}
+
 
 @router.post("/prompt-refine")
 async def refine_prompt(req: PromptRefineRequest):
