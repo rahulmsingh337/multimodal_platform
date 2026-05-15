@@ -54,6 +54,9 @@ jobs:
 
       - name: 🔍 Run Next.js build check
         id: build-check
+        env:
+          NEXTAUTH_SECRET: ci-test-secret
+          NEXT_PUBLIC_API_URL: https://multimodal-plat.vercel.app
         run: |
           cd frontend
           if npm run build 2>&1 | tee /tmp/build-output.txt | grep -qE "^Error:|Failed to compile"; then

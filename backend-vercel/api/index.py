@@ -24,9 +24,10 @@ def get_db():
         return None
     try:
         import psycopg2
-
-        return psycopg2.connect(DATABASE_URL, sslmode="require")
-    except:
+        return psycopg2.connect(DATABASE_URL, sslmode='require')
+    except ImportError:
+        return None  # psycopg2 not installed on Vercel runtime
+    except Exception:
         return None
 
 
