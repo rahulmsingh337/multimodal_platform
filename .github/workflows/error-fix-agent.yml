@@ -2,7 +2,7 @@ name: 🔧 Error Detection & Auto-Fix Agent
 
 on:
   push:
-    branches: ["master", "main"]
+    branches: ["master", "main", "Main"]
   workflow_dispatch:
     inputs:
       force_fix:

@@ -2,9 +2,9 @@ name: 🤖 CI Agent — Build, Lint & Type Check
 
 on:
   push:
-    branches: ["master", "main", "dev"]
+    branches: ["master", "main", "Main", "dev"]
   pull_request:
-    branches: ["master", "main"]
+    branches: ["master", "main", "Main"]
 
 jobs:
   frontend-check:

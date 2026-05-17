@@ -2,7 +2,7 @@ name: Vercel Deployment Monitor
 
 on:
   push:
-    branches: ["master", "main"]
+    branches: ["master", "main", "Main"]
   workflow_dispatch:
 
 jobs:
