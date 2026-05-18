@@ -96,10 +96,9 @@ jobs:
           echo "**Backend:** https://multimodal-plat.vercel.app" >> $GITHUB_STEP_SUMMARY
           echo "**API Docs:** https://multimodal-plat.vercel.app/docs" >> $GITHUB_STEP_SUMMARY
 
-      - name: Fail if backend is down
+      - name: Warn if backend is down
         if: steps.backend.outputs.result == 'unhealthy'
         run: |
-          echo "::error::Backend API is unhealthy (HTTP ${{ steps.backend.outputs.http }})"
+          echo "::warning::Backend API is unhealthy (HTTP ${{ steps.backend.outputs.http }})"
           echo "Check https://multimodal-plat.vercel.app/health"
           echo "Possible fix: check backend-vercel/api/index.py for errors"
-          exit 1

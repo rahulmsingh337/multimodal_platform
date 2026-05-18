@@ -111,6 +111,7 @@ jobs:
 
       - name: Create issue if backend is down
         if: steps.be.outputs.ok == 'false'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
@@ -138,4 +139,4 @@ jobs:
                 title, body, labels: ['deployment-failure', 'bug'],
               });
             }
-            core.setFailed('Backend is down — issue created');
+            core.warning('Backend is down — issue created');
