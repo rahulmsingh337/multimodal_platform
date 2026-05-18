@@ -4,11 +4,6 @@ on:
   push:
     branches: ["master", "main", "Main"]
   workflow_dispatch:
-    inputs:
-      force_fix:
-        description: 'Force run all fixes'
-        required: false
-        default: 'false'
 
 jobs:
   detect-and-fix:
